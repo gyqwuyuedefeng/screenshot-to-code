@@ -1,0 +1,210 @@
+name: Build and Push Screenshot-to-Code Docker Images
+
+on:
+  workflow_dispatch:  # Manual trigger
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+      - dev
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/docker-build.yml'
+      - 'docker-compose.yml'
+
+env:
+  ALIYUN_DOCKER_REGISTRY: ${{ secrets.ALIYUN_DOCKER_REGISTRY }}
+  BACKEND_IMAGE: ${{ secrets.ALIYUN_DOCKER_REGISTRY }}/gyq_personal/screenshot-to-code-backend
+  FRONTEND_IMAGE: ${{ secrets.ALIYUN_DOCKER_REGISTRY }}/gyq_personal/screenshot-to-code-frontend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    environment: production  # 使用 production 环境的 secrets
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 获取版本信息
+        id: version
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            echo "IS_TAG=true" >> $GITHUB_ENV
+            echo "Version from tag: $VERSION"
+          else
+            COMMIT_SHA=$(git rev-parse --short HEAD)
+            VERSION="1.0-SNAPSHOT-${COMMIT_SHA}"
+            echo "VERSION=$VERSION" >> $GITHUB_ENV
+            echo "IS_TAG=false" >> $GITHUB_ENV
+            echo "Version from commit: $VERSION"
+          fi
+
+      - name: 清理磁盘空间
+        run: |
+          echo "=== 清理前磁盘空间 ==="
+          df -h
+          echo "=== 清理大型预装软件 ==="
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /opt/az
+          echo "=== 清理 Docker 缓存 ==="
+          docker system prune -af --volumes || true
+          echo "=== 清理后磁盘空间 ==="
+          df -h
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:v0.12.5
+            network=host
+
+      - name: 检查必需的 Secrets
+        run: |
+          if [ -z "${{ secrets.ALIYUN_DOCKER_REGISTRY }}" ]; then
+            echo "❌ ALIYUN_DOCKER_REGISTRY secret 未配置"
+            exit 1
+          fi
+          if [ -z "${{ secrets.ALIYUN_DOCKER_USER }}" ]; then
+            echo "❌ ALIYUN_DOCKER_USER secret 未配置"
+            exit 1
+          fi
+          if [ -z "${{ secrets.ALIYUN_DOCKER_TOKEN }}" ]; then
+            echo "❌ ALIYUN_DOCKER_TOKEN secret 未配置"
+            exit 1
+          fi
+          echo "✅ 所有必需的 Secrets 已配置"
+          echo "📦 镜像仓库: ${{ env.ALIYUN_DOCKER_REGISTRY }}"
+          echo "📦 Backend 镜像: ${{ env.BACKEND_IMAGE }}"
+          echo "📦 Frontend 镜像: ${{ env.FRONTEND_IMAGE }}"
+
+      - name: 登录阿里云容器镜像仓库
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ALIYUN_DOCKER_REGISTRY }}
+          username: ${{ secrets.ALIYUN_DOCKER_USER }}
+          password: ${{ secrets.ALIYUN_DOCKER_TOKEN }}
+
+      - name: 监控系统资源
+        run: |
+          echo "=== 构建前系统资源检查 ==="
+          echo "CPU信息:"
+          nproc
+          echo "内存信息:"
+          free -h
+          echo "磁盘空间:"
+          df -h
+
+      - name: 构建并推送 Backend Docker 镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:${{ env.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+        timeout-minutes: 120
+
+      - name: 构建并推送 Frontend Docker 镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:${{ env.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+        timeout-minutes: 120
+
+      - name: 构建后空间检查
+        if: always()
+        run: |
+          echo "=== 构建后磁盘空间 ==="
+          df -h
+          echo "=== Docker镜像大小 ==="
+          docker images | head -10
+
+      - name: 手动推送镜像
+        if: failure() && github.event_name != 'pull_request'
+        run: |
+          echo "构建失败，尝试手动推送..."
+
+          # 推送 backend
+          if docker images | grep -q screenshot-to-code-backend; then
+            BACKEND_IMAGE_ID=$(docker images | grep screenshot-to-code-backend | head -n1 | awk '{print $3}')
+            echo "找到 backend 镜像 ID: $BACKEND_IMAGE_ID"
+            docker tag $BACKEND_IMAGE_ID ${{ env.BACKEND_IMAGE }}:latest
+            docker tag $BACKEND_IMAGE_ID ${{ env.BACKEND_IMAGE }}:${{ env.VERSION }}
+            docker push ${{ env.BACKEND_IMAGE }}:latest || echo "推送 backend latest 失败"
+            docker push ${{ env.BACKEND_IMAGE }}:${{ env.VERSION }} || echo "推送 backend 版本标签失败"
+          fi
+
+          # 推送 frontend
+          if docker images | grep -q screenshot-to-code-frontend; then
+            FRONTEND_IMAGE_ID=$(docker images | grep screenshot-to-code-frontend | head -n1 | awk '{print $3}')
+            echo "找到 frontend 镜像 ID: $FRONTEND_IMAGE_ID"
+            docker tag $FRONTEND_IMAGE_ID ${{ env.FRONTEND_IMAGE }}:latest
+            docker tag $FRONTEND_IMAGE_ID ${{ env.FRONTEND_IMAGE }}:${{ env.VERSION }}
+            docker push ${{ env.FRONTEND_IMAGE }}:latest || echo "推送 frontend latest 失败"
+            docker push ${{ env.FRONTEND_IMAGE }}:${{ env.VERSION }} || echo "推送 frontend 版本标签失败"
+          fi
+
+      - name: 构建后清理
+        if: always()
+        run: |
+          echo "=== 构建后磁盘空间 ==="
+          df -h
+          echo "=== 清理构建缓存 ==="
+          docker system prune -af --volumes || true
+          echo "=== 最终磁盘空间 ==="
+          df -h
+
+      - name: 构建状态通知
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Screenshot-to-Code Docker 镜像构建成功!"
+            echo "Backend 版本: ${{ env.VERSION }}"
+            echo "Frontend 版本: ${{ env.VERSION }}"
+            echo "构建平台: linux/amd64"
+            echo "镜像仓库: ${{ env.ALIYUN_DOCKER_REGISTRY }}"
+            echo "推送状态: ${{ github.event_name != 'pull_request' && '已推送' || '仅构建' }}"
+            echo ""
+            echo "🚀 使用方法："
+            echo "1. Backend 镜像: ${{ env.BACKEND_IMAGE }}:${{ env.VERSION }}"
+            echo "2. Frontend 镜像: ${{ env.FRONTEND_IMAGE }}:${{ env.VERSION }}"
+            echo ""
+            echo "📦 快速启动："
+            echo "docker pull ${{ env.BACKEND_IMAGE }}:latest"
+            echo "docker pull ${{ env.FRONTEND_IMAGE }}:latest"
+          else
+            echo "❌ Screenshot-to-Code Docker 镜像构建失败!"
+            echo "请检查上述诊断信息和构建日志"
+            exit 1
+          fi
