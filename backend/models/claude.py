@@ -1,6 +1,7 @@
 import copy
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Tuple, cast
+import httpx
 from anthropic import AsyncAnthropic
 from openai.types.chat import ChatCompletionMessageParam
 from config import IS_DEBUG_ENABLED
@@ -8,6 +9,26 @@ from debug.DebugFileWriter import DebugFileWriter
 from image_processing.utils import process_image
 from utils import pprint_prompt
 from llm import Completion, Llm
+
+
+def create_custom_http_client() -> httpx.AsyncClient:
+    """
+    Create a custom HTTP client with browser-like headers to bypass Cloudflare protection.
+    This makes requests look more like normal HTTP clients rather than Python SDK requests.
+    """
+    return httpx.AsyncClient(
+        headers={
+            # Use a generic User-Agent that looks like a common HTTP client
+            "User-Agent": "Mozilla/5.0 (compatible; Claude-API-Client/1.0)",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        },
+        timeout=httpx.Timeout(300.0, connect=60.0),  # Longer timeout for large requests
+        http2=False,  # Disable HTTP/2 for better compatibility
+        follow_redirects=True,  # Follow redirects automatically
+    )
 
 
 def convert_openai_messages_to_claude(
@@ -64,7 +85,14 @@ async def stream_claude_response(
     base_url: str | None = None,
 ) -> Completion:
     start_time = time.time()
-    client = AsyncAnthropic(api_key=api_key, base_url=base_url) if base_url else AsyncAnthropic(api_key=api_key)
+
+    # Use custom HTTP client when base_url is provided (i.e., using a gateway)
+    if base_url:
+        http_client = create_custom_http_client()
+        client = AsyncAnthropic(api_key=api_key, base_url=base_url, http_client=http_client)
+        print(f"Using custom HTTP client for gateway: {base_url}")
+    else:
+        client = AsyncAnthropic(api_key=api_key)
 
     # Base parameters
     max_tokens = 8192
@@ -134,7 +162,14 @@ async def stream_claude_response_native(
     base_url: str | None = None,
 ) -> Completion:
     start_time = time.time()
-    client = AsyncAnthropic(api_key=api_key, base_url=base_url) if base_url else AsyncAnthropic(api_key=api_key)
+
+    # Use custom HTTP client when base_url is provided (i.e., using a gateway)
+    if base_url:
+        http_client = create_custom_http_client()
+        client = AsyncAnthropic(api_key=api_key, base_url=base_url, http_client=http_client)
+        print(f"Using custom HTTP client for gateway: {base_url}")
+    else:
+        client = AsyncAnthropic(api_key=api_key)
 
     # Base model parameters
     max_tokens = 4096
