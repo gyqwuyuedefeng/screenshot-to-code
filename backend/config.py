@@ -10,6 +10,10 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", None)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", None)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", None)
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", None)
+ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", None)
+
+# Model selection (optional, uses defaults if not set)
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", None)
 
 # Image generation (optional)
 REPLICATE_API_KEY = os.environ.get("REPLICATE_API_KEY", None)

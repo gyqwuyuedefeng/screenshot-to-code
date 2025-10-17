@@ -16,8 +16,8 @@ on:
 
 env:
   ALIYUN_DOCKER_REGISTRY: ${{ secrets.ALIYUN_DOCKER_REGISTRY }}
-  BACKEND_IMAGE: ${{ secrets.ALIYUN_DOCKER_REGISTRY }}/gyq_personal/screenshot-to-code-backend
-  FRONTEND_IMAGE: ${{ secrets.ALIYUN_DOCKER_REGISTRY }}/gyq_personal/screenshot-to-code-frontend
+  BACKEND_IMAGE: ${{ secrets.ALIYUN_DOCKER_REGISTRY }}/${{ secrets.ALIYUN_DOCKER_NAMESPACE }}/screenshot-to-code-backend
+  FRONTEND_IMAGE: ${{ secrets.ALIYUN_DOCKER_REGISTRY }}/${{ secrets.ALIYUN_DOCKER_NAMESPACE }}/screenshot-to-code-frontend
 
 jobs:
   build-and-push:
@@ -83,8 +83,13 @@ jobs:
             echo "❌ ALIYUN_DOCKER_TOKEN secret 未配置"
             exit 1
           fi
+          if [ -z "${{ secrets.ALIYUN_DOCKER_NAMESPACE }}" ]; then
+            echo "❌ ALIYUN_DOCKER_NAMESPACE secret 未配置"
+            exit 1
+          fi
           echo "✅ 所有必需的 Secrets 已配置"
           echo "📦 镜像仓库: ${{ env.ALIYUN_DOCKER_REGISTRY }}"
+          echo "📦 命名空间: ${{ secrets.ALIYUN_DOCKER_NAMESPACE }}"
           echo "📦 Backend 镜像: ${{ env.BACKEND_IMAGE }}"
           echo "📦 Frontend 镜像: ${{ env.FRONTEND_IMAGE }}"
 

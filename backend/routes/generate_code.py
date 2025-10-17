@@ -8,6 +8,8 @@ import openai
 from codegen.utils import extract_html_content
 from config import (
     ANTHROPIC_API_KEY,
+    ANTHROPIC_BASE_URL,
+    ANTHROPIC_MODEL,
     GEMINI_API_KEY,
     IS_PROD,
     NUM_VARIANTS,
@@ -213,6 +215,7 @@ class ExtractedParams:
     openai_api_key: str | None
     anthropic_api_key: str | None
     openai_base_url: str | None
+    anthropic_base_url: str | None
     generation_type: Literal["create", "update"]
     prompt: PromptContent
     history: List[Dict[str, Any]]
@@ -262,6 +265,16 @@ class ParameterExtractionStage:
         if not openai_base_url:
             print("Using official OpenAI URL")
 
+        # Base URL for Anthropic API
+        anthropic_base_url: str | None = None
+        # Disable user-specified Anthropic Base URL in prod
+        if not IS_PROD:
+            anthropic_base_url = self._get_from_settings_dialog_or_env(
+                params, "anthropicBaseURL", ANTHROPIC_BASE_URL
+            )
+        if not anthropic_base_url:
+            print("Using official Anthropic URL")
+
         # Get the image generation flag from the request. Fall back to True if not provided.
         should_generate_images = bool(params.get("isImageGenerationEnabled", True))
 
@@ -288,6 +301,7 @@ class ParameterExtractionStage:
             openai_api_key=openai_api_key,
             anthropic_api_key=anthropic_api_key,
             openai_base_url=openai_base_url,
+            anthropic_base_url=anthropic_base_url,
             generation_type=generation_type,
             prompt=prompt,
             history=history,
@@ -360,7 +374,17 @@ class ModelSelectionStage:
     ) -> List[Llm]:
         """Simple model cycling that scales with num_variants"""
 
-        claude_model = Llm.CLAUDE_3_7_SONNET_2025_02_19
+        # Use configured model from environment variable if available
+        if ANTHROPIC_MODEL:
+            try:
+                # Try to match the configured model string to an Llm enum
+                claude_model = Llm(ANTHROPIC_MODEL)
+                print(f"Using configured Anthropic model from environment: {claude_model.value}")
+            except ValueError:
+                print(f"Warning: Invalid ANTHROPIC_MODEL '{ANTHROPIC_MODEL}' in environment, using default")
+                claude_model = Llm.CLAUDE_3_7_SONNET_2025_02_19
+        else:
+            claude_model = Llm.CLAUDE_3_7_SONNET_2025_02_19
 
         # For text input mode, use Claude 4 Sonnet as third option
         # For other input modes (image/video), use Gemini as third option
@@ -477,6 +501,7 @@ class VideoGenerationStage:
         self,
         prompt_messages: List[ChatCompletionMessageParam],
         anthropic_api_key: str | None,
+        anthropic_base_url: str | None = None,
     ) -> List[str]:
         """Generate code for video input mode"""
         if not anthropic_api_key:
@@ -498,6 +523,7 @@ class VideoGenerationStage:
                 callback=lambda x: process_chunk(x, 0),
                 model_name=Llm.CLAUDE_3_OPUS.value,
                 include_thinking=True,
+                base_url=anthropic_base_url,
             )
         ]
         completions = [result["code"] for result in completion_results]
@@ -543,12 +569,14 @@ class ParallelGenerationStage:
         openai_api_key: str | None,
         openai_base_url: str | None,
         anthropic_api_key: str | None,
+        anthropic_base_url: str | None,
         should_generate_images: bool,
     ):
         self.send_message = send_message
         self.openai_api_key = openai_api_key
         self.openai_base_url = openai_base_url
         self.anthropic_api_key = anthropic_api_key
+        self.anthropic_base_url = anthropic_base_url
         self.should_generate_images = should_generate_images
 
     async def process_variants(
@@ -630,6 +658,7 @@ class ParallelGenerationStage:
                         api_key=self.anthropic_api_key,
                         callback=lambda x, i=index: self._process_chunk(x, i),
                         model_name=claude_model.value,
+                        base_url=self.anthropic_base_url,
                     )
                 )
 
@@ -875,6 +904,7 @@ class CodeGenerationMiddleware(Middleware):
                     context.completions = await video_stage.generate_video_code(
                         context.prompt_messages,
                         context.extracted_params.anthropic_api_key,
+                        context.extracted_params.anthropic_base_url,
                     )
                 else:
                     # Select models
@@ -893,6 +923,7 @@ class CodeGenerationMiddleware(Middleware):
                         openai_api_key=context.extracted_params.openai_api_key,
                         openai_base_url=context.extracted_params.openai_base_url,
                         anthropic_api_key=context.extracted_params.anthropic_api_key,
+                        anthropic_base_url=context.extracted_params.anthropic_base_url,
                         should_generate_images=context.extracted_params.should_generate_images,
                     )
 

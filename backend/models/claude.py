@@ -61,9 +61,10 @@ async def stream_claude_response(
     api_key: str,
     callback: Callable[[str], Awaitable[None]],
     model_name: str,
+    base_url: str | None = None,
 ) -> Completion:
     start_time = time.time()
-    client = AsyncAnthropic(api_key=api_key)
+    client = AsyncAnthropic(api_key=api_key, base_url=base_url) if base_url else AsyncAnthropic(api_key=api_key)
 
     # Base parameters
     max_tokens = 8192
@@ -130,9 +131,10 @@ async def stream_claude_response_native(
     callback: Callable[[str], Awaitable[None]],
     include_thinking: bool = False,
     model_name: str = "claude-3-7-sonnet-20250219",
+    base_url: str | None = None,
 ) -> Completion:
     start_time = time.time()
-    client = AsyncAnthropic(api_key=api_key)
+    client = AsyncAnthropic(api_key=api_key, base_url=base_url) if base_url else AsyncAnthropic(api_key=api_key)
 
     # Base model parameters
     max_tokens = 4096
