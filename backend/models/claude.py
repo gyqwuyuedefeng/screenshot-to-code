@@ -1,6 +1,7 @@
 import copy
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Tuple, cast
+import httpx
 from anthropic import AsyncAnthropic
 from openai.types.chat import ChatCompletionMessageParam
 from config import IS_DEBUG_ENABLED
@@ -8,6 +9,23 @@ from debug.DebugFileWriter import DebugFileWriter
 from image_processing.utils import process_image
 from utils import pprint_prompt
 from llm import Completion, Llm
+
+
+def create_gateway_http_client() -> httpx.AsyncClient:
+    """
+    Create HTTP client with minimal headers to avoid Cloudflare blocking.
+    Some API gateways use Cloudflare which blocks requests with Python SDK headers.
+    We use a minimal set of headers similar to curl to bypass detection.
+    """
+    return httpx.AsyncClient(
+        headers={
+            "User-Agent": "curl/8.5.0",
+            "Accept": "*/*",
+        },
+        timeout=httpx.Timeout(600.0, connect=60.0),
+        # Don't set default headers from httpx
+        default_encoding="utf-8",
+    )
 
 
 def convert_openai_messages_to_claude(
@@ -67,8 +85,18 @@ async def stream_claude_response(
 
     # Create Anthropic client with base_url if provided
     if base_url:
-        client = AsyncAnthropic(api_key=api_key, base_url=base_url)
-        print(f"Using base_url: {base_url}")
+        # Use custom HTTP client and headers to avoid Cloudflare blocking
+        # Cloudflare blocks x-stainless-* headers from Anthropic SDK
+        http_client = create_gateway_http_client()
+        client = AsyncAnthropic(
+            api_key=api_key,
+            base_url=base_url,
+            http_client=http_client,
+            default_headers={
+                "User-Agent": "curl/8.5.0",
+            }
+        )
+        print(f"Using base_url with Cloudflare bypass: {base_url}")
     else:
         client = AsyncAnthropic(api_key=api_key)
 
@@ -142,8 +170,18 @@ async def stream_claude_response_native(
 
     # Create Anthropic client with base_url if provided
     if base_url:
-        client = AsyncAnthropic(api_key=api_key, base_url=base_url)
-        print(f"Using base_url: {base_url}")
+        # Use custom HTTP client and headers to avoid Cloudflare blocking
+        # Cloudflare blocks x-stainless-* headers from Anthropic SDK
+        http_client = create_gateway_http_client()
+        client = AsyncAnthropic(
+            api_key=api_key,
+            base_url=base_url,
+            http_client=http_client,
+            default_headers={
+                "User-Agent": "curl/8.5.0",
+            }
+        )
+        print(f"Using base_url with Cloudflare bypass: {base_url}")
     else:
         client = AsyncAnthropic(api_key=api_key)
 
