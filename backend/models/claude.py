@@ -111,13 +111,12 @@ async def stream_claude_response(
 
     else:
         # Stream Claude response
-        async with client.beta.messages.stream(
+        async with client.messages.stream(
             model=model_name,
             max_tokens=max_tokens,
             temperature=temperature,
             system=system_prompt,
             messages=claude_messages,  # type: ignore
-            betas=["output-128k-2025-02-19"],
         ) as stream:
             async for text in stream.text_stream:
                 response += text
